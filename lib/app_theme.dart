@@ -37,6 +37,27 @@ ThemeData buildLoveTheme() {
       foregroundColor: LoveColors.onyx,
       elevation: 0,
       centerTitle: false,
+      titleTextStyle: TextStyle(
+        fontSize: 16,
+        fontWeight: FontWeight.w700,
+        color: LoveColors.onyx,
+        letterSpacing: -0.2,
+      ),
+      iconTheme: IconThemeData(color: LoveColors.onyx),
+    ),
+    cardTheme: CardThemeData(
+      color: LoveColors.white,
+      elevation: 0,
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: const BorderSide(color: LoveColors.border),
+      ),
+    ),
+    textSelectionTheme: const TextSelectionThemeData(
+      cursorColor: LoveColors.wine,
+      selectionColor: Color(0x337A263A),
+      selectionHandleColor: LoveColors.wine,
     ),
     textTheme: const TextTheme(
       displayLarge: TextStyle(
@@ -58,6 +79,7 @@ ThemeData buildLoveTheme() {
         fontSize: 23,
         fontWeight: FontWeight.w600,
         color: LoveColors.wine,
+        height: 1.18,
       ),
       titleLarge: TextStyle(
         fontSize: 18,
@@ -86,6 +108,16 @@ ThemeData buildLoveTheme() {
       filled: true,
       fillColor: LoveColors.white,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+      floatingLabelStyle: const TextStyle(
+        color: LoveColors.wine,
+        fontWeight: FontWeight.w600,
+      ),
+      hintStyle: const TextStyle(color: LoveColors.taupe, fontSize: 14),
+      errorStyle: const TextStyle(
+        color: LoveColors.red,
+        fontSize: 12,
+        height: 1.25,
+      ),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
         borderSide: const BorderSide(color: LoveColors.border),
@@ -103,7 +135,7 @@ ThemeData buildLoveTheme() {
       style: ElevatedButton.styleFrom(
         backgroundColor: LoveColors.wine,
         foregroundColor: Colors.white,
-        minimumSize: const Size.fromHeight(54),
+        minimumSize: const Size.fromHeight(50),
         shape: const StadiumBorder(),
         textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
       ),
@@ -111,7 +143,7 @@ ThemeData buildLoveTheme() {
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         foregroundColor: LoveColors.wine,
-        minimumSize: const Size.fromHeight(52),
+        minimumSize: const Size.fromHeight(48),
         side: const BorderSide(color: LoveColors.wine),
         shape: const StadiumBorder(),
       ),
@@ -126,6 +158,31 @@ ThemeData buildLoveTheme() {
         color: LoveColors.wine,
         fontSize: 13,
         fontWeight: FontWeight.w700,
+      ),
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: LoveColors.blush,
+      height: 76,
+      elevation: 0,
+      labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      indicatorColor: const Color(0xFFF4D9D5),
+      labelTextStyle: WidgetStateProperty.resolveWith(
+        (states) => TextStyle(
+          color: states.contains(WidgetState.selected)
+              ? LoveColors.wine
+              : LoveColors.charcoal,
+          fontSize: 12,
+          fontWeight: states.contains(WidgetState.selected)
+              ? FontWeight.w700
+              : FontWeight.w500,
+        ),
+      ),
+      iconTheme: WidgetStateProperty.resolveWith(
+        (states) => IconThemeData(
+          color: states.contains(WidgetState.selected)
+              ? LoveColors.wine
+              : LoveColors.taupe,
+        ),
       ),
     ),
     dividerColor: LoveColors.border,

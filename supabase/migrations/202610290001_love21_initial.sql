@@ -1,15 +1,16 @@
 -- Love 21 starter schema (PostgreSQL / Supabase).
--- Apply only after reviewing the age-policy conflict and setting up a real project.
+-- Initial Love 21 schema. Review security policies before production deployment.
 create extension if not exists pgcrypto;
 
 create table if not exists public.love21_config (
   singleton boolean primary key default true check (singleton),
-  minimum_age smallint not null default 20 check (minimum_age >= 18),
+  minimum_age smallint not null default 18 check (minimum_age >= 18),
   challenge_days smallint not null default 21 check (challenge_days = 21),
   reveal_days smallint not null default 14 check (reveal_days = 14),
   challenge_timezone text not null default 'Asia/Kolkata'
 );
 insert into public.love21_config(singleton) values (true) on conflict do nothing;
+update public.love21_config set minimum_age = 18 where singleton;
 alter table public.love21_config enable row level security;
 
 create table if not exists public.profiles (

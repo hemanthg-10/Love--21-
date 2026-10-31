@@ -1,5 +1,5 @@
 import 'dart:typed_data';
-
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -7,8 +7,27 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app_services.dart';
 import 'app_theme.dart';
 
-const int minimumAge =
-    20; // Existing formal rule; see README for the 18+ conflict.
+const int minimumAge = 18;
+
+DateTime latestEligibleBirthDate([DateTime? todayOverride]) {
+  final today = todayOverride ?? DateTime.now();
+  final year = today.year - minimumAge;
+  final lastDay = DateTime(year, today.month + 1, 0).day;
+  return DateTime(year, today.month, today.day.clamp(1, lastDay).toInt());
+}
+
+bool isAtLeastMinimumAge(DateTime birthDate, [DateTime? todayOverride]) {
+  final latest = latestEligibleBirthDate(todayOverride);
+  final date = DateTime(birthDate.year, birthDate.month, birthDate.day);
+  return !date.isAfter(latest);
+}
+
+String? oppositeGenderPreference(String? registeredGender) =>
+    switch (registeredGender) {
+      'Man' => 'Women',
+      'Woman' => 'Men',
+      _ => null,
+    };
 
 class Love21App extends StatelessWidget {
   const Love21App({super.key});
@@ -26,12 +45,13 @@ class WelcomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => FlowPage(
     showBack: false,
+    sketchAlignment: const Alignment(0.7, -0.8),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 12),
+        const SizedBox(height: 4),
         const BrandMark(),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
         Container(
           height: 225,
           decoration: BoxDecoration(
@@ -44,13 +64,30 @@ class WelcomePage extends StatelessWidget {
           ),
           child: Stack(
             children: [
-              Positioned(
-                right: 24,
-                top: 26,
-                child: Icon(
-                  Icons.favorite_rounded,
-                  size: 108,
-                  color: Colors.white.withValues(alpha: .3),
+              Positioned.fill(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(28),
+                  child: Image.asset(
+                    'assets/images/love21_couple_banner.png',
+                    fit: BoxFit.cover,
+                    alignment: const Alignment(0, -0.32),
+                  ),
+                ),
+              ),
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(28),
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        LoveColors.wine.withValues(alpha: .04),
+                        LoveColors.wine.withValues(alpha: .76),
+                      ],
+                      stops: const [0.28, 1],
+                    ),
+                  ),
                 ),
               ),
               const Positioned(
@@ -71,7 +108,7 @@ class WelcomePage extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 18),
         Text(
           'Meaningful love, unhurried',
           style: Theme.of(context).textTheme.headlineLarge,
@@ -127,6 +164,9 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
   final _name = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
+  final _confirmPassword = TextEditingController();
+  final _phone = TextEditingController();
+  String _countryCode = '+91';
   DateTime? _birthDate;
   String? _gender;
   bool _busy = false;
@@ -135,16 +175,19 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     _name.dispose();
     _email.dispose();
     _password.dispose();
+    _confirmPassword.dispose();
+    _phone.dispose();
     super.dispose();
   }
 
   Future<void> _chooseBirthDate() async {
     final now = DateTime.now();
+    final latest = latestEligibleBirthDate(now);
     final date = await showDatePicker(
       context: context,
-      initialDate: DateTime(now.year - 25),
+      initialDate: latest,
       firstDate: DateTime(1900),
-      lastDate: now,
+      lastDate: latest,
     );
     if (date != null) setState(() => _birthDate = date);
   }
@@ -154,6 +197,13 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
         _birthDate == null ||
         _gender == null) {
       notice(context, 'Add your birth date and gender to continue.');
+      return;
+    }
+    if (!isAtLeastMinimumAge(_birthDate!)) {
+      notice(
+        context,
+        'You must be at least 18 years old to create an account.',
+      );
       return;
     }
     setState(() => _busy = true);
@@ -175,6 +225,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
           gender: _gender!,
         );
       } else {
+        await LoveDemo.setRegisteredGender(_gender!);
         await showDemoNotice(context);
       }
       if (!mounted) return;
@@ -183,6 +234,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
         ContactVerificationPage(
           email: _email.text.trim(),
           name: _name.text.trim(),
+          phone: '$_countryCode${_phone.text.replaceAll(RegExp(r'\D'), '')}',
           birthDate: _birthDate!,
           gender: _gender!,
         ),
@@ -203,6 +255,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
   @override
   Widget build(BuildContext context) => FlowPage(
     title: 'Create account',
+    sketchAlignment: const Alignment(0.7, -0.15),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -245,8 +298,54 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
                     ? null
                     : 'Use at least 8 characters',
               ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _confirmPassword,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Confirm password',
+                ),
+                validator: (v) => v == null || v.isEmpty
+                    ? 'Confirm your password'
+                    : v != _password.text
+                    ? 'Passwords do not match. Please try again.'
+                    : null,
+              ),
             ],
           ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            SizedBox(
+              width: 112,
+              child: DropdownButtonFormField<String>(
+                value: _countryCode,
+                decoration: const InputDecoration(labelText: 'Code'),
+                items: const [
+                  DropdownMenuItem(value: '+91', child: Text('+91')),
+                  DropdownMenuItem(value: '+1', child: Text('+1')),
+                  DropdownMenuItem(value: '+44', child: Text('+44')),
+                  DropdownMenuItem(value: '+61', child: Text('+61')),
+                ],
+                onChanged: (value) {
+                  if (value != null) setState(() => _countryCode = value);
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextFormField(
+                controller: _phone,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Mobile number'),
+                validator: (v) =>
+                    (v == null || v.replaceAll(RegExp(r'\D'), '').length < 7)
+                    ? 'Enter a valid mobile number'
+                    : null,
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 12),
         OutlinedButton.icon(
@@ -269,7 +368,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
         ),
         const SizedBox(height: 14),
         const NoticeBox(
-          'Design notes say 18+, while the formal product rule says 20+. This app keeps the formal 20+ rule until approved otherwise.',
+          'You must be at least 18 to create an account. Your age is checked by the server.',
           Icons.info_outline,
         ),
         const SizedBox(height: 18),
@@ -337,14 +436,45 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) => FlowPage(
     title: 'Welcome back',
+    sketchAlignment: const Alignment(0.7, 0.35),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        const SizedBox(height: 24),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(22),
+          child: SizedBox(
+            height: 142,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Image.asset(
+                  'assets/images/love21_login_couple.png',
+                  fit: BoxFit.cover,
+                  alignment: const Alignment(0, -0.28),
+                ),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.transparent,
+                        LoveColors.wine.withValues(alpha: .35),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 18),
         Text(
           'Pick up where you left off.',
           style: Theme.of(context).textTheme.headlineMedium,
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 16),
         TextField(
           controller: _email,
           keyboardType: TextInputType.emailAddress,
@@ -438,69 +568,115 @@ class RecoveryPage extends StatelessWidget {
   }
 }
 
-class ContactVerificationPage extends StatelessWidget {
+class ContactVerificationPage extends StatefulWidget {
   const ContactVerificationPage({
     super.key,
     required this.email,
     required this.name,
     required this.birthDate,
     required this.gender,
+    required this.phone,
   });
   final String email, name, gender;
+  final String phone;
   final DateTime birthDate;
   @override
+  State<ContactVerificationPage> createState() =>
+      _ContactVerificationPageState();
+}
+
+class _ContactVerificationPageState extends State<ContactVerificationPage> {
+  final _emailCode = TextEditingController();
+  final _phoneCode = TextEditingController();
+  bool _emailVerified = false;
+  bool _phoneVerified = false;
+  @override
+  void dispose() {
+    _emailCode.dispose();
+    _phoneCode.dispose();
+    super.dispose();
+  }
+
+  void _verify(TextEditingController code, bool email) {
+    if (!LoveDemo.enabled) {
+      notice(
+        context,
+        'OTP delivery requires configured email and SMS providers.',
+      );
+      return;
+    }
+    if (code.text.trim() != '123456') {
+      notice(context, 'Demo OTP is 123456.');
+      return;
+    }
+    setState(() {
+      if (email) {
+        _emailVerified = true;
+      } else {
+        _phoneVerified = true;
+      }
+    });
+    notice(context, '${email ? 'Email' : 'Mobile'} demo OTP verified.');
+  }
+
+  @override
   Widget build(BuildContext context) => FlowPage(
-    title: 'Verify your email',
+    title: 'Verify your contacts',
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Icon(
-          Icons.mark_email_read_outlined,
-          size: 60,
-          color: LoveColors.wine,
-        ),
-        const SizedBox(height: 16),
-        Text(
-          'Check your inbox',
-          style: Theme.of(context).textTheme.headlineMedium,
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'We sent a verification link to $email. Your account stays gated until the provider confirms it.',
-        ),
-        const SizedBox(height: 18),
-        FilledButton(
-          onPressed: () async {
-            if (!LoveBackend.configured) {
-              await showDemoNotice(context);
-              return;
-            }
-            try {
-              await LoveBackend.resendEmailVerification(email);
-              if (context.mounted)
-                notice(
-                  context,
-                  'If the address can be verified, a new link has been sent.',
-                );
-            } catch (_) {
-              if (context.mounted)
-                notice(
-                  context,
-                  'Could not resend. Check the address and retry.',
-                );
-            }
-          },
-          child: const Text('Resend verification link'),
-        ),
-        const SizedBox(height: 10),
         const NoticeBox(
-          'Demo mode does not send email or create a real account.',
-          Icons.visibility_outlined,
+          'Demo OTP mode • Codes are simulated locally and are not sent.',
+          Icons.science_outlined,
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
+        Text('Email OTP', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 4),
+        Text('Enter the 6-digit code for ${widget.email}.'),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _emailCode,
+          keyboardType: TextInputType.number,
+          maxLength: 6,
+          decoration: const InputDecoration(
+            labelText: 'Email verification code',
+            counterText: '',
+          ),
+        ),
         OutlinedButton(
-          onPressed: () => go(context, HobbiesPage(name: name)),
-          child: const Text('Preview next step (demo only)'),
+          onPressed: () => _verify(_emailCode, true),
+          child: Text(_emailVerified ? 'Email verified' : 'Verify email OTP'),
+        ),
+        const SizedBox(height: 24),
+        Text('Mobile OTP', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 4),
+        Text('Enter the 6-digit code for ${widget.phone}.'),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _phoneCode,
+          keyboardType: TextInputType.number,
+          maxLength: 6,
+          decoration: const InputDecoration(
+            labelText: 'Mobile verification code',
+            counterText: '',
+          ),
+        ),
+        OutlinedButton(
+          onPressed: () => _verify(_phoneCode, false),
+          child: Text(_phoneVerified ? 'Mobile verified' : 'Verify mobile OTP'),
+        ),
+        const SizedBox(height: 12),
+        OutlinedButton(
+          onPressed: _emailVerified && _phoneVerified
+              ? () => go(
+                  context,
+                  HobbiesPage(
+                    name: widget.name,
+                    registeredGender: widget.gender,
+                  ),
+                )
+              : null,
+          child: const Text('Continue'),
         ),
       ],
     ),
@@ -537,8 +713,13 @@ class AgeRestrictionPage extends StatelessWidget {
 }
 
 class HobbiesPage extends StatefulWidget {
-  const HobbiesPage({super.key, required this.name});
+  const HobbiesPage({
+    super.key,
+    required this.name,
+    required this.registeredGender,
+  });
   final String name;
+  final String registeredGender;
   @override
   State<HobbiesPage> createState() => _HobbiesPageState();
 }
@@ -546,9 +727,80 @@ class HobbiesPage extends StatefulWidget {
 class _HobbiesPageState extends State<HobbiesPage> {
   final _selected = <String>{};
   final _groups = const {
-    'Daily hobbies': ['Cooking', 'Gardening', 'Photography', 'Writing'],
-    'Movement': ['Walking', 'Running', 'Yoga', 'Fitness', 'Football'],
-    'Culture': ['Books', 'Cinema', 'Music', 'Travel', 'Art'],
+    'Daily Hobbies': [
+      'Cooking',
+      'Baking',
+      'Gardening',
+      'Photography',
+      'Reading',
+      'Writing',
+      'Journaling',
+      'DIY Projects',
+      'Pet Care',
+      'Home Decorating',
+    ],
+    'Gaming & Technology': [
+      'Video Gaming',
+      'Mobile Gaming',
+      'PC Gaming',
+      'Console Gaming',
+      'Esports',
+      'Online Multiplayer Games',
+      'Board Games',
+      'Puzzles',
+      'Coding',
+      'Technology',
+      'Robotics',
+    ],
+    'Sports & Movement': [
+      'Walking',
+      'Running',
+      'Gym',
+      'Fitness',
+      'Yoga',
+      'Football',
+      'Cricket',
+      'Badminton',
+      'Basketball',
+      'Volleyball',
+      'Swimming',
+      'Cycling',
+      'Hiking',
+      'Trekking',
+    ],
+    'Creative Activities': [
+      'Drawing',
+      'Painting',
+      'Music',
+      'Singing',
+      'Playing Instruments',
+      'Dancing',
+      'Crafting',
+      'Fashion',
+      'Content Creation',
+      'Videography',
+    ],
+    'Culture & Entertainment': [
+      'Books',
+      'Cinema',
+      'TV Series',
+      'Anime',
+      'Travel',
+      'Podcasts',
+      'Theatre',
+      'Museums',
+      'Live Events',
+    ],
+    'Food & Outdoors': [
+      'Food Exploring',
+      'Café Hopping',
+      'Restaurant Exploring',
+      'Camping',
+      'Nature Walks',
+      'Adventure Activities',
+      'Volunteering',
+      'Exploring New Places',
+    ],
   };
   @override
   Widget build(BuildContext context) => FlowPage(
@@ -574,6 +826,13 @@ class _HobbiesPageState extends State<HobbiesPage> {
                 FilterChip(
                   label: Text(item),
                   selected: _selected.contains(item),
+                  selectedColor: LoveColors.wine,
+                  labelStyle: TextStyle(
+                    color: _selected.contains(item)
+                        ? Colors.white
+                        : LoveColors.charcoal,
+                  ),
+                  checkmarkColor: Colors.white,
                   onSelected: (v) => setState(
                     () => v ? _selected.add(item) : _selected.remove(item),
                   ),
@@ -581,17 +840,23 @@ class _HobbiesPageState extends State<HobbiesPage> {
             ],
           ),
         ],
-        const SizedBox(height: 16),
-        FilledButton(
-          onPressed: _selected.isEmpty
-              ? null
-              : () => go(context, ProfilePreviewPage(name: widget.name)),
-          child: const Text('Preview your profile'),
-        ),
         const SizedBox(height: 8),
         const NoticeBox(
           'Interests help with hobby-based discovery. Challenge photos are private.',
           Icons.favorite_border,
+        ),
+        const SizedBox(height: 16),
+        FilledButton(
+          onPressed: _selected.isEmpty
+              ? null
+              : () => go(
+                  context,
+                  ProfilePreviewPage(
+                    name: widget.name,
+                    registeredGender: widget.registeredGender,
+                  ),
+                ),
+          child: const Text('Preview your profile'),
         ),
       ],
     ),
@@ -599,16 +864,21 @@ class _HobbiesPageState extends State<HobbiesPage> {
 }
 
 class ProfilePreviewPage extends StatefulWidget {
-  const ProfilePreviewPage({super.key, required this.name});
+  const ProfilePreviewPage({
+    super.key,
+    required this.name,
+    required this.registeredGender,
+  });
   final String name;
+  final String registeredGender;
   @override
   State<ProfilePreviewPage> createState() => _ProfilePreviewPageState();
 }
 
 class _ProfilePreviewPageState extends State<ProfilePreviewPage> {
   final _bio = TextEditingController();
-  String? _preference;
   Uint8List? _profilePhoto;
+  String? get _preference => oppositeGenderPreference(widget.registeredGender);
   @override
   void dispose() {
     _bio.dispose();
@@ -633,6 +903,12 @@ class _ProfilePreviewPageState extends State<ProfilePreviewPage> {
   @override
   Widget build(BuildContext context) => FlowPage(
     title: 'Profile preview',
+    bottomAction: FilledButton(
+      onPressed: _preference == null
+          ? null
+          : () => go(context, const IdentityPage()),
+      child: const Text('Continue to identity check'),
+    ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -645,7 +921,7 @@ class _ProfilePreviewPageState extends State<ProfilePreviewPage> {
           child: GestureDetector(
             onTap: _pickProfilePhoto,
             child: CircleAvatar(
-              radius: 54,
+              radius: 58,
               backgroundColor: LoveColors.blush,
               backgroundImage: _profilePhoto == null
                   ? null
@@ -678,26 +954,31 @@ class _ProfilePreviewPageState extends State<ProfilePreviewPage> {
           ),
         ),
         const SizedBox(height: 8),
-        DropdownButtonFormField<String>(
-          value: _preference,
-          decoration: const InputDecoration(labelText: 'I am interested in'),
-          items: const [
-            DropdownMenuItem(value: 'Man', child: Text('Men')),
-            DropdownMenuItem(value: 'Woman', child: Text('Women')),
-            DropdownMenuItem(value: 'Both', child: Text('Men and women')),
-          ],
-          onChanged: (value) => setState(() => _preference = value),
+        InputDecorator(
+          decoration: const InputDecoration(labelText: 'Discovery preference'),
+          child: Row(
+            children: [
+              const Icon(Icons.favorite_border, color: LoveColors.wine),
+              const SizedBox(width: 10),
+              Text(
+                _preference == null
+                    ? 'Preference unavailable'
+                    : 'Interested in $_preference',
+                style: TextStyle(
+                  color: _preference == null
+                      ? LoveColors.red
+                      : LoveColors.charcoal,
+                ),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 14),
         const NoticeBox(
           'Challenge photos are stored separately and never appear here unless you choose a profile photo yourself.',
           Icons.lock_outline,
         ),
-        const SizedBox(height: 16),
-        FilledButton(
-          onPressed: () => go(context, const IdentityPage()),
-          child: const Text('Continue to identity check'),
-        ),
+        const SizedBox(height: 20),
       ],
     ),
   );
@@ -763,13 +1044,14 @@ class _IdentityPageState extends State<IdentityPage> {
         ),
         const SizedBox(height: 12),
         const NoticeBox(
-          'Do not upload identity documents into this demo app.',
+          'For your safety, identity documents are accepted only through a secure authorised verification provider. Do not upload them directly to Love 21.',
           Icons.privacy_tip_outlined,
         ),
         const SizedBox(height: 18),
-        const FilledButton(
+        FilledButton.icon(
           onPressed: null,
-          child: Text('Provider setup required'),
+          icon: Icon(Icons.upload_file_outlined),
+          label: Text('Add Proof • Provider setup required'),
         ),
         const SizedBox(height: 8),
         OutlinedButton(
@@ -841,7 +1123,20 @@ class _ChallengeDashboardPageState extends State<ChallengeDashboardPage> {
   @override
   void initState() {
     super.initState();
+    love21VerifiedDays.addListener(_onVerifiedDaysChanged);
     _load();
+  }
+
+  void _onVerifiedDaysChanged() {
+    if (!mounted) return;
+    final value = love21VerifiedDays.value.clamp(0, 21).toInt();
+    if (value != _verified) setState(() => _verified = value);
+  }
+
+  @override
+  void dispose() {
+    love21VerifiedDays.removeListener(_onVerifiedDaysChanged);
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -859,6 +1154,7 @@ class _ChallengeDashboardPageState extends State<ChallengeDashboardPage> {
     try {
       final value = await LoveBackend.verifiedDayCount();
       final canSubmit = await LoveBackend.canParticipateInChallenge();
+      love21VerifiedDays.value = value.clamp(0, 21).toInt();
       if (mounted)
         setState(() {
           _verified = value;
@@ -884,9 +1180,21 @@ class _ChallengeDashboardPageState extends State<ChallengeDashboardPage> {
           style: Theme.of(context).textTheme.headlineMedium,
         ),
         const SizedBox(height: 8),
-        Text(
-          '$_verified of 21 days verified',
-          style: Theme.of(context).textTheme.titleMedium,
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '$_verified of 21 days verified',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            const Icon(Icons.local_fire_department, color: LoveColors.coral),
+            const SizedBox(width: 4),
+            Text(
+              '$_verified day streak',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
         ),
         const SizedBox(height: 9),
         LinearProgressIndicator(
@@ -897,41 +1205,72 @@ class _ChallengeDashboardPageState extends State<ChallengeDashboardPage> {
           backgroundColor: LoveColors.elevated,
         ),
         const SizedBox(height: 14),
-        if (LoveDemo.enabled)
-          const NoticeBox(
-            'DEMO MODE • Local progress is saved on this device. Review outcomes are simulated.',
-            Icons.visibility_outlined,
-          ),
         if (_error != null) ErrorBox(_error!),
         const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: List.generate(
-            21,
-            (i) => Container(
-              width: 38,
-              height: 38,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: i < _verified ? LoveColors.wine : LoveColors.card,
-                border: Border.all(
-                  color: i < _verified ? LoveColors.wine : LoveColors.border,
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 7,
+            crossAxisSpacing: 4,
+            mainAxisSpacing: 4,
+            childAspectRatio: 1.08,
+          ),
+          itemCount: 21,
+          itemBuilder: (context, i) {
+            final verified = i < _verified;
+            final current = i == _verified && _verified < 21;
+            final fill = verified
+                ? LoveColors.wine
+                : current
+                ? LoveColors.blush
+                : LoveColors.card;
+            final stroke = verified
+                ? LoveColors.wine
+                : current
+                ? LoveColors.rose
+                : LoveColors.border;
+            return CustomPaint(
+              painter: DayHeartPainter(
+                fill: fill,
+                stroke: stroke,
+                strokeWidth: current ? 2 : 1,
+              ),
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 5),
+                  child: Text(
+                    '${i + 1}',
+                    style: TextStyle(
+                      color: verified
+                          ? Colors.white
+                          : current
+                          ? LoveColors.wine
+                          : LoveColors.taupe,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ),
-              child: Text(
-                (i + 1).toString(),
-                style: TextStyle(
-                  color: i < _verified ? Colors.white : LoveColors.taupe,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
+            );
+          },
+        ),
+        const SizedBox(height: 18),
+        if (_verified == 21)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 14),
+            child: Text(
+              'You showed up for yourself every day.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: LoveColors.wine,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                fontStyle: FontStyle.italic,
               ),
             ),
           ),
-        ),
-        const SizedBox(height: 18),
         const StateCard(
           title: 'Today',
           value: 'Ready to submit',
@@ -966,11 +1305,6 @@ class _ChallengeDashboardPageState extends State<ChallengeDashboardPage> {
             onPressed: () async {
               await LoveDemo.addVerifiedDay();
               await _load();
-              if (mounted)
-                notice(
-                  context,
-                  'Demo review: Day ${_verified} marked Verified.',
-                );
             },
             icon: const Icon(Icons.science_outlined),
             label: const Text('Simulate verified day'),
@@ -1001,28 +1335,113 @@ class ChallengeCompletionPage extends StatefulWidget {
       _ChallengeCompletionPageState();
 }
 
+class DayHeartPainter extends CustomPainter {
+  const DayHeartPainter({
+    required this.fill,
+    required this.stroke,
+    this.strokeWidth = 1,
+  });
+
+  final Color fill;
+  final Color stroke;
+  final double strokeWidth;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final path = Path()
+      ..moveTo(w * .5, h * .93)
+      ..cubicTo(w * .42, h * .84, w * .05, h * .55, w * .05, h * .34)
+      ..cubicTo(w * .05, h * .08, w * .39, h * .04, w * .5, h * .29)
+      ..cubicTo(w * .61, h * .04, w * .95, h * .08, w * .95, h * .34)
+      ..cubicTo(w * .95, h * .55, w * .58, h * .84, w * .5, h * .93)
+      ..close();
+    canvas.drawPath(path, Paint()..color = fill);
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = stroke
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant DayHeartPainter oldDelegate) =>
+      oldDelegate.fill != fill ||
+      oldDelegate.stroke != stroke ||
+      oldDelegate.strokeWidth != strokeWidth;
+}
+
 class _ChallengeCompletionPageState extends State<ChallengeCompletionPage> {
   bool _eligible = false;
   bool _loading = false;
   Future<void> _check() async {
+    final wasUnlocked = love21NavigationUnlocked.value;
+    setState(() => _loading = true);
     if (LoveDemo.enabled) {
       final days = await LoveDemo.verifiedDays();
-      if (mounted) setState(() => _eligible = days >= 21);
+      final demoAccess = days >= 21;
+      await LoveDemo.setDiscoveryEligible(demoAccess);
+      if (!mounted) return;
+      setState(() {
+        _eligible = demoAccess;
+        _loading = false;
+      });
+      if (demoAccess) {
+        if (!wasUnlocked && mounted) {
+          await showDialog<void>(
+            context: context,
+            builder: (dialogContext) => AlertDialog(
+              title: const Text('Demo access enabled'),
+              content: const Text(
+                'Identity verification is still pending. Secure provider integration is required for production verification. You can continue exploring the local demo experience.',
+              ),
+              actions: [
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Continue to Discover'),
+                ),
+              ],
+            ),
+          );
+        }
+        if (mounted) go(context, const MainShell(initialIndex: 1));
+      } else {
+        notice(context, 'Complete the 21-day challenge to open the demo.');
+      }
       return;
     }
     if (!LoveBackend.configured) {
-      notice(context, 'Demo mode cannot unlock discovery.');
+      if (mounted) {
+        setState(() {
+          _eligible = false;
+          _loading = false;
+        });
+        love21NavigationUnlocked.value = false;
+        notice(
+          context,
+          'The server is not configured, so eligibility cannot be confirmed.',
+        );
+      }
       return;
     }
-    setState(() => _loading = true);
     try {
+      final days = await LoveBackend.verifiedDayCount();
+      love21VerifiedDays.value = days.clamp(0, 21).toInt();
       final result = await LoveBackend.canDiscover();
-      if (mounted) setState(() => _eligible = result);
+      love21NavigationUnlocked.value = result && days >= 21;
+      if (mounted) setState(() => _eligible = result && days >= 21);
+      if (result && days >= 21 && mounted) {
+        if (!wasUnlocked) notice(context, 'Discovery Unlocked!');
+        go(context, const MainShell(initialIndex: 1));
+      }
     } catch (_) {
       if (mounted)
         notice(context, 'The backend could not confirm eligibility.');
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && !_eligible) setState(() => _loading = false);
     }
   }
 
@@ -1044,11 +1463,17 @@ class _ChallengeCompletionPageState extends State<ChallengeCompletionPage> {
         ),
         const SizedBox(height: 16),
         StateCard(
-          title: 'Discovery',
-          value: _eligible ? 'Unlocked by server' : 'Still locked',
+          title: LoveDemo.enabled ? 'Demo eligibility' : 'Discovery',
+          value: _eligible
+              ? (LoveDemo.enabled ? 'Demo unlocked' : 'Unlocked by server')
+              : 'Still locked',
           body: _eligible
-              ? 'Your account is eligible. Candidate profiles must come from the backend.'
-              : 'Challenge completion alone does not unlock discovery until server checks finish.',
+              ? (LoveDemo.enabled
+                    ? 'The local challenge simulation is complete. Sample profiles are clearly marked as demo data.'
+                    : 'Your account is eligible. Candidate profiles must come from the backend.')
+              : LoveDemo.enabled
+              ? 'Demo mode cannot verify identity. Discovery stays locked until a secure identity provider and backend are configured.'
+              : 'Challenge completion alone does not unlock discovery until the backend confirms age, identity, and eligibility.',
           color: _eligible ? LoveColors.green : LoveColors.amber,
           icon: _eligible ? Icons.lock_open : Icons.lock_outline,
         ),
@@ -1074,6 +1499,16 @@ class _DailySubmissionPageState extends State<DailySubmissionPage> {
   XFile? _photo;
   Uint8List? _bytes;
   bool _busy = false;
+  String? _quizAnswer;
+  static const _quizOptions = ['Energised', 'Relaxed', 'Accomplished'];
+  @override
+  void initState() {
+    super.initState();
+    LoveDemo.quizAnswer(widget.day).then((v) {
+      if (mounted) setState(() => _quizAnswer = v);
+    });
+  }
+
   @override
   void dispose() {
     _caption.dispose();
@@ -1101,6 +1536,10 @@ class _DailySubmissionPageState extends State<DailySubmissionPage> {
   }
 
   Future<void> _submit() async {
+    if (_quizAnswer == null) {
+      notice(context, 'Please select one answer to continue.');
+      return;
+    }
     if (_photo == null || _caption.text.trim().isEmpty) {
       notice(context, 'Add a photo and a short caption first.');
       return;
@@ -1204,6 +1643,29 @@ class _DailySubmissionPageState extends State<DailySubmissionPage> {
             hintText: 'What did this moment mean to you?',
           ),
         ),
+        const SizedBox(height: 12),
+        Text(
+          "Today's Quick Quiz",
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: 6),
+        const Text("How did today's activity make you feel?"),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          children: [
+            for (final answer in _quizOptions)
+              ChoiceChip(
+                label: Text(answer),
+                selected: _quizAnswer == answer,
+                onSelected: (selected) async {
+                  if (!selected) return;
+                  setState(() => _quizAnswer = answer);
+                  await LoveDemo.saveQuizAnswer(widget.day, answer);
+                },
+              ),
+          ],
+        ),
         const SizedBox(height: 8),
         const NoticeBox(
           'Pending and rejected entries do not count. A Verified status must come from the server.',
@@ -1234,10 +1696,53 @@ class SubmissionStatusPage extends StatefulWidget {
 class _SubmissionStatusPageState extends State<SubmissionStatusPage> {
   late String _status;
   bool _loading = false;
+  bool _autoReturnScheduled = false;
   @override
   void initState() {
     super.initState();
     _status = widget.initialStatus;
+    _scheduleAutoReturnIfVerified();
+  }
+
+  void _scheduleAutoReturnIfVerified() {
+    if (_status != 'verified' || _autoReturnScheduled) return;
+    _autoReturnScheduled = true;
+    Future<void>.delayed(const Duration(seconds: 5), () {
+      if (!mounted) return;
+      _returnToChallenge();
+    });
+  }
+
+  Future<void> _returnToChallenge() async {
+    if (widget.submissionId != null &&
+        !LoveDemo.enabled &&
+        LoveBackend.configured) {
+      try {
+        final days = await LoveBackend.verifiedDayCount();
+        love21VerifiedDays.value = days.clamp(0, 21).toInt();
+      } catch (_) {
+        // The challenge screen will retry its normal progress refresh.
+      }
+    }
+    if (!mounted) return;
+    love21SelectedTab.value = 0;
+    final navigator = Navigator.of(context);
+    var foundMainShell = false;
+    navigator.popUntil((route) {
+      if (route.settings.name == 'MainShell') {
+        foundMainShell = true;
+        return true;
+      }
+      return route.isFirst;
+    });
+    if (foundMainShell) return;
+    navigator.pushAndRemoveUntil<void>(
+      MaterialPageRoute<void>(
+        settings: const RouteSettings(name: 'MainShell'),
+        builder: (_) => const MainShell(),
+      ),
+      (_) => false,
+    );
   }
 
   Future<void> _appeal() async {
@@ -1294,7 +1799,10 @@ class _SubmissionStatusPageState extends State<SubmissionStatusPage> {
       final value = await LoveBackend.challengeSubmissionStatus(
         widget.submissionId!,
       );
-      if (mounted) setState(() => _status = value);
+      if (mounted) {
+        setState(() => _status = value);
+        _scheduleAutoReturnIfVerified();
+      }
     } catch (_) {
       if (mounted) notice(context, 'Could not refresh review status.');
     } finally {
@@ -1369,7 +1877,8 @@ class _SubmissionStatusPageState extends State<SubmissionStatusPage> {
 }
 
 class DiscoveryGatePage extends StatefulWidget {
-  const DiscoveryGatePage({super.key});
+  const DiscoveryGatePage({super.key, this.previewOnly = false});
+  final bool previewOnly;
   @override
   State<DiscoveryGatePage> createState() => _DiscoveryGatePageState();
 }
@@ -1378,20 +1887,68 @@ class _DiscoveryGatePageState extends State<DiscoveryGatePage> {
   bool _loading = false;
   bool? _eligible;
   List<Map<String, dynamic>> _candidates = [];
-  int _current = 0;
+  List<Map<String, dynamic>> _savedCandidates = [];
+  bool _showSaved = false;
+  bool _loadingMore = false;
+  @override
+  void initState() {
+    super.initState();
+    if (widget.previewOnly) {
+      _eligible = true;
+      _candidates = _demoProfiles();
+      return;
+    }
+    _check();
+  }
+
+  List<Map<String, dynamic>> _demoProfiles() => List.generate(
+    10,
+    (i) => {
+      'candidate_id': 'demo_${i + 1}',
+      'age': 22 + i % 8,
+      'display_name': ['Maya', 'Anika', 'Riya', 'Tara', 'Nisha'][i % 5],
+      'gender': 'Preview only',
+      'short_bio': [
+        'Loves weekend hikes and quiet coffee shops.',
+        'Finding joy in music, books, and new recipes.',
+        'Fitness, films, and meaningful conversations.',
+      ][i % 3],
+      'interests': [
+        ['Hiking', 'Coffee', 'Travel'],
+        ['Music', 'Reading', 'Cooking'],
+        ['Fitness', 'Movies', 'Art'],
+      ][i % 3],
+    },
+  );
+
   Future<void> _check() async {
     if (LoveDemo.enabled) {
       final days = await LoveDemo.verifiedDays();
+      final navigationEligible = await LoveDemo.discoveryEligible();
+      final registeredGender = await LoveDemo.registeredGender();
+      final targetGender = switch (oppositeGenderPreference(registeredGender)) {
+        'Women' => 'Woman',
+        'Men' => 'Man',
+        _ => null,
+      };
+      final eligible = days >= 21 && navigationEligible;
+      love21NavigationUnlocked.value = eligible;
       if (mounted)
         setState(() {
-          _eligible = days >= 21;
-          _candidates = days >= 21
+          _eligible = eligible;
+          _candidates = eligible
               ? List.generate(10, (i) {
-                  final female = i % 2 == 0;
                   return {
                     'candidate_id': 'demo_${i + 1}',
                     'age': 22 + i % 8,
-                    'gender': female ? 'Woman' : 'Man',
+                    'display_name': [
+                      'Maya',
+                      'Anika',
+                      'Riya',
+                      'Tara',
+                      'Nisha',
+                    ][i % 5],
+                    'gender': targetGender ?? 'Preview only',
                     'short_bio': [
                       'Loves weekend hikes and quiet coffee shops.',
                       'Finding joy in music, books, and new recipes.',
@@ -1405,13 +1962,13 @@ class _DiscoveryGatePageState extends State<DiscoveryGatePage> {
                   };
                 })
               : <Map<String, dynamic>>[];
-          _current = 0;
         });
       return;
     }
     if (!LoveBackend.configured ||
         LoveBackend.client.auth.currentUser == null) {
       setState(() => _eligible = false);
+      love21NavigationUnlocked.value = false;
       return;
     }
     setState(() => _loading = true);
@@ -1420,11 +1977,12 @@ class _DiscoveryGatePageState extends State<DiscoveryGatePage> {
       final candidates = result
           ? await LoveBackend.discoveryCandidates()
           : <Map<String, dynamic>>[];
+      love21NavigationUnlocked.value = result;
       if (mounted)
         setState(() {
           _eligible = result;
           _candidates = candidates;
-          _current = 0;
+          _savedCandidates = [];
         });
     } catch (_) {
       if (mounted)
@@ -1468,37 +2026,32 @@ class _DiscoveryGatePageState extends State<DiscoveryGatePage> {
     return result;
   }
 
-  Future<void> _act(String action) async {
-    if (_current >= _candidates.length) return;
-    final profile = _candidates[_current];
+  Future<void> _act(Map<String, dynamic> profile, String action) async {
     final id = profile['candidate_id'].toString();
     if (LoveDemo.enabled) {
-      if (action == 'interested' && _current % 3 == 0) {
-        if (mounted)
-          go(context, const MatchCreatedPage(connectionId: 'demo_connection'));
-        return;
-      }
-      if (mounted) setState(() => _current++);
+      if (action == 'interested') await LoveDemo.addInterestedProfile(profile);
       if (mounted)
+        setState(() {
+          _candidates.remove(profile);
+          if (action == 'view_later')
+            _savedCandidates.insert(0, profile);
+          else
+            _savedCandidates.removeWhere(
+              (p) => p['candidate_id'].toString() == id,
+            );
+        });
+      if (action == 'view_later' && mounted)
+        notice(context, 'Saved for later.');
+      if (action == 'interested' && mounted)
         notice(
           context,
-          action == 'interested'
-              ? 'Demo: interest sent; some profiles may become mutual connections.'
-              : action == 'view_later'
-              ? 'Saved to View Later.'
-              : 'Passed.',
+          'Interest saved to Connections. It is a demo interest, not a confirmed match.',
         );
       return;
     }
     setState(() => _loading = true);
     try {
-      if (action == 'report_user') {
-        go(context, ReportUserPage(userId: id));
-        return;
-      } else if (action == 'block_user') {
-        await LoveBackend.blockUser(id);
-        if (mounted) notice(context, 'This profile is blocked.');
-      } else if (action == 'interested') {
+      if (action == 'interested') {
         final comment = await _interestComment();
         if (comment == null) return;
         final connectionId = await LoveBackend.submitInterest(
@@ -1514,13 +2067,23 @@ class _DiscoveryGatePageState extends State<DiscoveryGatePage> {
           context,
           'Interest sent. A connection appears only after mutual interest is confirmed.',
         );
-      } else {
+      } else if (action == 'view_later') {
         await LoveBackend.recordDiscoveryAction(
           otherUserId: id,
           action: action,
         );
       }
-      if (mounted) setState(() => _current++);
+      if (mounted) {
+        setState(() {
+          _candidates.removeWhere(
+            (candidate) => candidate['candidate_id'].toString() == id,
+          );
+          _savedCandidates.removeWhere(
+            (candidate) => candidate['candidate_id'].toString() == id,
+          );
+        });
+        if (action == 'view_later') notice(context, 'Saved for later.');
+      }
     } catch (_) {
       if (mounted)
         notice(context, 'That action could not be saved. Retry when online.');
@@ -1529,64 +2092,137 @@ class _DiscoveryGatePageState extends State<DiscoveryGatePage> {
     }
   }
 
+  Future<void> _loadSaved() async {
+    setState(() {
+      _showSaved = true;
+      _loadingMore = true;
+    });
+    try {
+      final saved = LoveDemo.enabled
+          ? _savedCandidates
+          : await LoveBackend.mySavedProfiles();
+      if (mounted) setState(() => _savedCandidates = saved);
+    } catch (_) {
+      if (mounted) notice(context, 'Saved profiles could not be loaded.');
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (LoveDemo.enabled || _loadingMore || _showSaved) return;
+    setState(() => _loadingMore = true);
+    try {
+      final next = await LoveBackend.discoveryCandidates(
+        offset: _candidates.length,
+      );
+      if (mounted) setState(() => _candidates.addAll(next));
+    } catch (_) {
+      if (mounted) notice(context, 'More profiles could not be loaded.');
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
+  }
+
   Future<void> _openDetails(Map<String, dynamic> profile) async {
-    final action = await showModalBottomSheet<String>(
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: LoveColors.canvas,
       builder: (_) => CandidateDetailsSheet(profile: profile),
     );
-    if (action != null) await _act(action);
   }
 
   @override
   Widget build(BuildContext context) {
     final open = _eligible == true;
     return FlowPage(
-      title: 'Discovery access',
-      actions: [IconButton(onPressed: _check, icon: const Icon(Icons.refresh))],
+      title: widget.previewOnly ? 'Discovery preview' : 'Discovery access',
+      previewTabs: widget.previewOnly,
+      actions: open
+          ? const []
+          : [IconButton(onPressed: _check, icon: const Icon(Icons.refresh))],
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          StateCard(
-            title: LoveDemo.enabled ? 'Demo eligibility' : 'Server eligibility',
-            value: _loading
-                ? 'Checking…'
-                : open
-                ? (LoveDemo.enabled ? 'Unlocked' : 'Eligible')
-                : 'Locked',
-            body: open
-                ? (LoveDemo.enabled
-                      ? '21 verified demo days reached. Ten sample profiles are ready.'
-                      : 'Backend confirmed age, identity, account status, and 21 verified days.')
-                : (LoveDemo.enabled
-                      ? 'Complete 21 verified demo days to unlock sample profiles.'
-                      : 'Discovery stays locked until the backend confirms every eligibility check.'),
-            color: open ? LoveColors.green : LoveColors.amber,
-            icon: open ? Icons.lock_open_outlined : Icons.lock_outline,
-          ),
-          const SizedBox(height: 12),
-          if (LoveDemo.enabled)
+          if (widget.previewOnly)
             const NoticeBox(
-              'DEMO MODE • Profiles and eligibility are simulated locally. Profile gender is filtered to the opposite gender.',
-              Icons.cloud_off_outlined,
+              'Preview only • Identity is still pending. These sample profiles do not create matches or unlock real discovery.',
+              Icons.visibility_outlined,
             ),
-          const SizedBox(height: 12),
-          FilledButton(
-            onPressed: _loading ? null : _check,
-            child: Text(_loading ? 'Checking…' : 'Check again'),
-          ),
+          if (!open)
+            StateCard(
+              title: LoveDemo.enabled
+                  ? 'Demo eligibility'
+                  : 'Server eligibility',
+              value: _loading
+                  ? 'Checking…'
+                  : open
+                  ? (LoveDemo.enabled ? 'Unlocked' : 'Eligible')
+                  : 'Locked',
+              body: open
+                  ? (LoveDemo.enabled
+                        ? '21 verified demo days reached. Ten sample profiles are ready.'
+                        : 'Backend confirmed age, identity, account status, and 21 verified days.')
+                  : (LoveDemo.enabled
+                        ? 'Complete 21 verified demo days to unlock sample profiles.'
+                        : 'Discovery stays locked until the backend confirms every eligibility check.'),
+              color: open ? LoveColors.green : LoveColors.amber,
+              icon: open ? Icons.lock_open_outlined : Icons.lock_outline,
+            ),
+          if (!open) ...[
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: _loading ? null : _check,
+              child: Text(_loading ? 'Checking…' : 'Check eligibility'),
+            ),
+          ],
           if (open)
-            if (_current < _candidates.length)
-              Padding(
-                padding: const EdgeInsets.only(top: 14),
-                child: AnonymousProfileCard(
-                  profile: _candidates[_current],
-                  loading: _loading,
-                  onDetails: () => _openDetails(_candidates[_current]),
-                  onAction: _act,
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: _showSaved
+                    ? () => setState(() => _showSaved = false)
+                    : _loadSaved,
+                icon: Icon(
+                  _showSaved ? Icons.explore_outlined : Icons.bookmark_outline,
                 ),
+                label: Text(
+                  _showSaved ? 'Back to discovery' : 'Saved for later',
+                ),
+              ),
+            ),
+          if (open)
+            if (_loadingMore && _showSaved && _savedCandidates.isEmpty)
+              const Center(child: CircularProgressIndicator())
+            else if (_showSaved && _savedCandidates.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 20),
+                child: Text('Profiles you save will appear here.'),
               )
+            else if (_showSaved)
+              for (final profile in _savedCandidates)
+                Padding(
+                  padding: const EdgeInsets.only(top: 14),
+                  child: AnonymousProfileCard(
+                    profile: profile,
+                    loading: _loading,
+                    onDetails: () => _openDetails(profile),
+                    onAction: (action) => _act(profile, action),
+                  ),
+                ),
+          if (open && !_showSaved)
+            if (_candidates.isNotEmpty)
+              for (final profile in _candidates)
+                Padding(
+                  padding: const EdgeInsets.only(top: 14),
+                  child: AnonymousProfileCard(
+                    profile: profile,
+                    loading: _loading,
+                    onDetails: () => _openDetails(profile),
+                    onAction: (action) => _act(profile, action),
+                  ),
+                )
             else
               const Padding(
                 padding: EdgeInsets.only(top: 12),
@@ -1594,6 +2230,14 @@ class _DiscoveryGatePageState extends State<DiscoveryGatePage> {
                   'No more eligible profiles are available right now. Check again later.',
                 ),
               ),
+          if (open && !_showSaved && _candidates.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 14),
+              child: OutlinedButton(
+                onPressed: _loadingMore ? null : _loadMore,
+                child: Text(_loadingMore ? 'Loading…' : 'Load more profiles'),
+              ),
+            ),
         ],
       ),
     );
@@ -1640,7 +2284,8 @@ class AnonymousProfileCard extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              'Anonymous • ' +
+              (profile['display_name'] ?? 'Love 21 member').toString() +
+                  ' • ' +
                   profile['age'].toString() +
                   ' • ' +
                   profile['gender'].toString(),
@@ -1681,10 +2326,6 @@ class AnonymousProfileCard extends StatelessWidget {
               onPressed: loading ? null : () => onAction('view_later'),
               child: const Text('View Later'),
             ),
-            TextButton(
-              onPressed: loading ? null : () => onAction('not_for_me'),
-              child: const Text('Not for Me'),
-            ),
           ],
         ),
       ),
@@ -1710,7 +2351,8 @@ class CandidateDetailsSheet extends StatelessWidget {
             const Icon(Icons.person_outline, size: 52, color: LoveColors.wine),
             const SizedBox(height: 12),
             Text(
-              'Anonymous • ' +
+              (profile['display_name'] ?? 'Love 21 member').toString() +
+                  ' • ' +
                   profile['age'].toString() +
                   ' • ' +
                   profile['gender'].toString(),
@@ -1736,26 +2378,6 @@ class CandidateDetailsSheet extends StatelessWidget {
               Icons.visibility_off_outlined,
             ),
             const SizedBox(height: 12),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, 'interested'),
-              child: const Text('Interested'),
-            ),
-            OutlinedButton(
-              onPressed: () => Navigator.pop(context, 'view_later'),
-              child: const Text('View Later'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, 'not_for_me'),
-              child: const Text('Not for Me'),
-            ),
-            OutlinedButton(
-              onPressed: () => Navigator.pop(context, 'block_user'),
-              child: const Text('Block this profile'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, 'report_user'),
-              child: const Text('Report this profile'),
-            ),
           ],
         ),
       ),
@@ -1798,49 +2420,189 @@ class MatchCreatedPage extends StatelessWidget {
 }
 
 class MainShell extends StatefulWidget {
-  const MainShell({super.key});
+  const MainShell({super.key, this.initialIndex = 0});
+  final int initialIndex;
   @override
   State<MainShell> createState() => _MainShellState();
 }
 
 class _MainShellState extends State<MainShell> {
-  int _index = 0;
+  late int _index;
   final _pages = const [
     ChallengeDashboardPage(),
     DiscoveryGatePage(),
+    LikesPage(),
     ConnectionsPage(),
     SettingsPage(),
   ];
   @override
-  Widget build(BuildContext context) => Scaffold(
-    body: SafeArea(
-      child: Column(
-        children: [
-          if (!LoveBackend.configured) const DemoStrip(),
-          Expanded(child: _pages[_index]),
-        ],
-      ),
-    ),
-    bottomNavigationBar: NavigationBar(
-      selectedIndex: _index,
-      onDestinationSelected: (v) => setState(() => _index = v),
-      destinations: const [
-        NavigationDestination(
-          icon: Icon(Icons.auto_stories_outlined),
-          label: 'Challenge',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.explore_outlined),
-          label: 'Discover',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.forum_outlined),
-          label: 'Connections',
-        ),
-        NavigationDestination(
-          icon: Icon(Icons.person_outline),
-          label: 'Settings',
-        ),
+  void initState() {
+    super.initState();
+    _index = widget.initialIndex.clamp(0, 4).toInt();
+    love21SelectedTab.value = _index;
+    love21NavigationUnlocked.addListener(_onEligibilityChanged);
+    love21SelectedTab.addListener(_onTabChanged);
+    if (LoveDemo.enabled) {
+      LoveDemo.discoveryEligible().then((eligible) {
+        if (mounted) love21NavigationUnlocked.value = eligible;
+      });
+    } else {
+      love21NavigationUnlocked.value = false;
+      if (LoveBackend.configured &&
+          LoveBackend.client.auth.currentUser != null) {
+        _loadServerEligibility();
+      }
+    }
+  }
+
+  Future<void> _loadServerEligibility() async {
+    try {
+      final days = await LoveBackend.verifiedDayCount();
+      love21VerifiedDays.value = days.clamp(0, 21).toInt();
+      final eligible = days >= 21 && await LoveBackend.canDiscover();
+      if (mounted) {
+        if (eligible && widget.initialIndex > 0) {
+          setState(() => _index = widget.initialIndex.clamp(0, 3).toInt());
+        }
+        love21NavigationUnlocked.value = eligible;
+      }
+    } catch (_) {
+      if (mounted) love21NavigationUnlocked.value = false;
+    }
+  }
+
+  void _onEligibilityChanged() {
+    if (!mounted) return;
+    setState(() {
+      if (!love21NavigationUnlocked.value) _index = 0;
+    });
+  }
+
+  void _onTabChanged() {
+    if (!mounted) return;
+    final next = love21SelectedTab.value.clamp(0, 4).toInt();
+    if (next != _index) setState(() => _index = next);
+  }
+
+  Future<void> _selectTab(int index) async {
+    if (index == 0) {
+      love21SelectedTab.value = 0;
+      setState(() => _index = 0);
+      return;
+    }
+    final eligible = LoveDemo.enabled
+        ? await LoveDemo.discoveryEligible()
+        : await LoveBackend.canDiscover();
+    if (!mounted) return;
+    love21NavigationUnlocked.value = eligible;
+    if (eligible) {
+      love21SelectedTab.value = index;
+      setState(() => _index = index);
+    }
+  }
+
+  @override
+  void dispose() {
+    love21NavigationUnlocked.removeListener(_onEligibilityChanged);
+    love21SelectedTab.removeListener(_onTabChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final unlocked = love21NavigationUnlocked.value;
+    return Scaffold(
+      body: SafeArea(child: unlocked ? _pages[_index] : _pages.first),
+      bottomNavigationBar: unlocked
+          ? LoveBottomNavigation(selectedIndex: _index, onSelected: _selectTab)
+          : null,
+    );
+  }
+}
+
+class LikesPage extends StatefulWidget {
+  const LikesPage({super.key});
+  @override
+  State<LikesPage> createState() => _LikesPageState();
+}
+
+class _LikesPageState extends State<LikesPage> {
+  List<Map<String, dynamic>> _likes = [];
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final rows = await LoveDemo.incomingLikes();
+    if (mounted) setState(() => _likes = rows);
+  }
+
+  Future<void> _likeBack(Map<String, dynamic> profile) async {
+    await LoveDemo.addInterestedProfile(profile);
+    await LoveDemo.removeIncomingLike(profile['candidate_id'].toString());
+    if (!mounted) return;
+    await _load();
+    notice(context, "It's a match! You both showed interest. (Demo)");
+  }
+
+  @override
+  Widget build(BuildContext context) => FlowPage(
+    title: 'People who like you',
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text("See who's interested in getting to know you."),
+        const SizedBox(height: 12),
+        if (_likes.isEmpty)
+          const StateCard(
+            title: 'Likes',
+            value: 'Your admirers will appear here.',
+            body: 'Stay consistent, express yourself and let meaningful connections grow.',
+            color: LoveColors.coral,
+            icon: Icons.favorite_border,
+          ),
+        for (final p in _likes)
+          Card(
+            color: LoveColors.white,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    '${p['display_name']} · ${p['age']} · ${p['gender']}',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(p['short_bio'].toString()),
+                  Chip(
+                    avatar: const Icon(Icons.favorite, color: LoveColors.wine),
+                    label: const Text('Liked your profile'),
+                  ),
+                  Text(
+                    '“${p['message']}”',
+                    style: const TextStyle(
+                      color: LoveColors.wine,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => showModalBottomSheet<void>(
+                      context: context,
+                      builder: (_) => CandidateDetailsSheet(profile: p),
+                    ),
+                    child: const Text('View Profile'),
+                  ),
+                  FilledButton(
+                    onPressed: () => _likeBack(p),
+                    child: const Text('Like Back'),
+                  ),
+                ],
+              ),
+            ),
+          ),
       ],
     ),
   );
@@ -1862,10 +2624,21 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
   }
 
   Future<void> _load() async {
+    if (!love21NavigationUnlocked.value) return;
+    if (LoveDemo.enabled) {
+      final rows = await LoveDemo.interestedProfiles();
+      if (mounted) setState(() => _connections = rows);
+      return;
+    }
     if (!LoveBackend.configured || LoveBackend.client.auth.currentUser == null)
       return;
     setState(() => _loading = true);
     try {
+      if (!await LoveBackend.canDiscover()) {
+        love21NavigationUnlocked.value = false;
+        if (mounted) setState(() => _connections = []);
+        return;
+      }
       final result = await LoveBackend.myConnections();
       if (mounted) setState(() => _connections = result);
     } catch (_) {
@@ -1910,97 +2683,184 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
   Widget build(BuildContext context) => FlowPage(
     title: 'Anonymous connections',
     actions: [IconButton(onPressed: _load, icon: const Icon(Icons.refresh))],
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const NoticeBox(
-          'No left/right swipes. Use Interested, Not for Me, or View Later. A match needs backend-confirmed mutual interest.',
-          Icons.visibility_off_outlined,
-        ),
-        const SizedBox(height: 14),
-        if (_loading) const Center(child: CircularProgressIndicator()),
-        if (_connections.isEmpty)
-          const StateCard(
-            title: 'Connections',
-            value: 'No connections yet',
-            body: 'Names and photos stay hidden. A connection appears after mutual interest is confirmed by the backend.',
-            color: LoveColors.amber,
-            icon: Icons.people_outline,
-          ),
-        for (var i = 0; i < _connections.length; i++)
-          Column(
+    child: !love21NavigationUnlocked.value
+        ? const LockedFeatureMessage()
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SettingItem(
-                Icons.forum_outlined,
-                'Anonymous connection ' + (i + 1).toString(),
-                'Text-only chat • Photo reveal after 14 days with mutual consent',
-                () => go(
-                  context,
-                  ChatPage(connectionId: _connections[i]['id'].toString()),
-                ),
+              const NoticeBox(
+                'Connections appear after the backend confirms mutual interest. Your conversations stay anonymous.',
+                Icons.visibility_off_outlined,
               ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => _unmatch(_connections[i]['id'].toString()),
-                  child: const Text('Unmatch'),
+              const SizedBox(height: 14),
+              if (_loading) const Center(child: CircularProgressIndicator()),
+              if (_connections.isEmpty)
+                const StateCard(
+                  title: 'Connections',
+                  value: 'No connections yet',
+                  body: 'When someone shares your interest, your anonymous conversation will be ready here.',
+                  color: LoveColors.amber,
+                  icon: Icons.people_outline,
                 ),
-              ),
+              for (var i = 0; i < _connections.length; i++)
+                Column(
+                  children: [
+                    Card(
+                      color: LoveColors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(22),
+                        side: const BorderSide(color: LoveColors.border),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text(
+                              '${_connections[i]['display_name'] ?? 'Love 21 member'} • ${_connections[i]['age']} • ${_connections[i]['gender']}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              (_connections[i]['short_bio'] ?? '')
+                                      .toString()
+                                      .isEmpty
+                                  ? 'A Love 21 member.'
+                                  : _connections[i]['short_bio'].toString(),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Connected ${_connectionDate(_connections[i]['matched_at'])} • ${_revealCountdown(_connections[i]['matched_at'])}',
+                              style: const TextStyle(
+                                color: LoveColors.taupe,
+                                fontSize: 12,
+                              ),
+                            ),
+                            Wrap(
+                              spacing: 6,
+                              children: [
+                                for (final tag
+                                    in (_connections[i]['interests'] as List? ??
+                                            const [])
+                                        .take(4))
+                                  Chip(label: Text(tag.toString())),
+                              ],
+                            ),
+                            FilledButton.icon(
+                              onPressed: () => go(
+                                context,
+                                ChatPage(
+                                  connectionId: _connections[i]['id']
+                                      .toString(),
+                                ),
+                              ),
+                              icon: const Icon(Icons.forum_outlined),
+                              label: const Text('Open Chat'),
+                            ),
+                            OutlinedButton(
+                              onPressed: () => go(
+                                context,
+                                RevealPage(
+                                  connectionId: _connections[i]['id']
+                                      .toString(),
+                                ),
+                              ),
+                              child: const Text('Photo Reveal Consent'),
+                            ),
+                            TextButton(
+                              onPressed: () =>
+                                  _unmatch(_connections[i]['id'].toString()),
+                              child: const Text('Unmatch'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              const SizedBox(height: 14),
             ],
           ),
-        const SizedBox(height: 14),
-        OutlinedButton(
-          onPressed: () => go(context, const ChatPage()),
-          child: const Text('Preview chat screen'),
-        ),
-        OutlinedButton(
-          onPressed: () => go(context, const RevealPage()),
-          child: const Text('Preview photo reveal consent'),
-        ),
-      ],
-    ),
   );
 }
 
 class ChatPage extends StatefulWidget {
-  const ChatPage({super.key, this.connectionId});
-  final String? connectionId;
+  const ChatPage({super.key, required this.connectionId});
+  final String connectionId;
   @override
   State<ChatPage> createState() => _ChatPageState();
 }
 
 class _ChatPageState extends State<ChatPage> {
   final _message = TextEditingController();
+  final _scroll = ScrollController();
   List<Map<String, dynamic>> _messages = [];
   bool _busy = false;
+  bool _loading = true;
+  bool get _isLocalDemoConnection =>
+      LoveDemo.enabled || widget.connectionId.startsWith('demo_');
   @override
   void initState() {
     super.initState();
+    love21SelectedTab.value = 2;
     _load();
   }
 
   @override
   void dispose() {
     _message.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
-    if (widget.connectionId == null || !LoveBackend.configured) return;
+    if (_isLocalDemoConnection) {
+      final rows = await LoveDemo.demoMessages(widget.connectionId);
+      if (mounted)
+        setState(() {
+          _messages = rows;
+          _loading = false;
+        });
+      return;
+    }
+    if (!LoveBackend.configured ||
+        LoveBackend.client.auth.currentUser == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
     try {
-      final rows = await LoveBackend.connectionMessages(widget.connectionId!);
-      if (mounted) setState(() => _messages = rows);
+      final rows = await LoveBackend.connectionMessages(widget.connectionId);
+      if (mounted) {
+        setState(() {
+          _messages = rows;
+          _loading = false;
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_scroll.hasClients)
+            _scroll.jumpTo(_scroll.position.maxScrollExtent);
+        });
+      }
     } catch (_) {
+      if (mounted) setState(() => _loading = false);
       if (mounted) notice(context, 'Could not load messages.');
     }
   }
 
   Future<void> _send() async {
-    if (widget.connectionId == null || _message.text.trim().isEmpty) return;
+    if (_message.text.trim().isEmpty) return;
     setState(() => _busy = true);
     try {
+      if (_isLocalDemoConnection) {
+        await LoveDemo.addDemoMessage(widget.connectionId, _message.text);
+        _message.clear();
+        await _load();
+        return;
+      }
       await LoveBackend.sendTextMessage(
-        connectionId: widget.connectionId!,
+        connectionId: widget.connectionId,
         text: _message.text,
       );
       _message.clear();
@@ -2015,79 +2875,158 @@ class _ChatPageState extends State<ChatPage> {
   @override
   Widget build(BuildContext context) => FlowPage(
     title: 'Anonymous chat',
+    expandBody: true,
+    persistentTabs: true,
     actions: [IconButton(onPressed: _load, icon: const Icon(Icons.refresh))],
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const StateCard(
-          title: 'Connection',
-          value: 'Anonymous',
-          body: 'Text-only chat. The 14-day timer starts when both people accept.',
-          color: LoveColors.amber,
-          icon: Icons.chat_bubble_outline,
-        ),
-        const SizedBox(height: 12),
-        if (widget.connectionId == null)
-          const NoticeBox(
-            'Preview only. Messages are available after a backend-confirmed match.',
-            Icons.visibility_outlined,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          StateCard(
+            title: 'Connection',
+            value: 'Anonymous',
+            body: 'Text-only conversation. Photo reveal eligibility: 14 days after mutual acceptance.',
+            color: LoveColors.amber,
+            icon: Icons.chat_bubble_outline,
           ),
-        SizedBox(
-          height: 260,
-          child: _messages.isEmpty
-              ? const Center(
-                  child: Text(
-                    'Start with a kind question.',
-                    style: TextStyle(color: LoveColors.taupe),
-                  ),
-                )
-              : ListView.builder(
-                  itemCount: _messages.length,
-                  itemBuilder: (context, index) => Align(
-                    alignment: Alignment.centerLeft,
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: LoveColors.blush,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Text(_messages[index]['body'].toString()),
+          const SizedBox(height: 8),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _messages.isEmpty
+                ? const Center(
+                    child: Text(
+                      'Start with a kind question.',
+                      style: TextStyle(color: LoveColors.taupe),
                     ),
+                  )
+                : ListView.builder(
+                    controller: _scroll,
+                    itemCount: _messages.length,
+                    itemBuilder: (context, index) {
+                      final mine = _isLocalDemoConnection
+                          ? _messages[index]['sender_id'] == 'demo_me'
+                          : _messages[index]['sender_id'] ==
+                                LoveBackend.client.auth.currentUser?.id;
+                      return Align(
+                        alignment: mine
+                            ? Alignment.centerRight
+                            : Alignment.centerLeft,
+                        child: Container(
+                          constraints: BoxConstraints(
+                            maxWidth: MediaQuery.sizeOf(context).width * .76,
+                          ),
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: mine ? LoveColors.wine : LoveColors.blush,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Text(
+                            _messages[index]['body'].toString(),
+                            style: TextStyle(
+                              color: mine ? Colors.white : LoveColors.onyx,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                ),
-        ),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _message,
-                enabled: widget.connectionId != null,
-                maxLength: 2000,
-                decoration: const InputDecoration(
-                  counterText: '',
-                  hintText: 'Write a message',
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _message,
+                  enabled: !_busy,
+                  maxLength: 2000,
+                  decoration: const InputDecoration(
+                    counterText: '',
+                    hintText: 'Write a message',
+                  ),
                 ),
               ),
+              const SizedBox(width: 8),
+              IconButton.filled(
+                onPressed: _busy ? null : _send,
+                icon: const Icon(Icons.send),
+              ),
+            ],
+          ),
+          const Padding(
+            padding: EdgeInsets.only(top: 5, bottom: 4),
+            child: Text(
+              'Private text-only chat • No images or attachments',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: LoveColors.taupe),
             ),
-            const SizedBox(width: 8),
-            IconButton.filled(
-              onPressed: _busy ? null : _send,
-              icon: const Icon(Icons.send),
-            ),
-          ],
-        ),
-        const NoticeBox(
-          'No images or attachments are allowed in anonymous chat.',
-          Icons.lock_outline,
-        ),
-      ],
+          ),
+        ],
+      ),
     ),
   );
 }
 
-class RevealPage extends StatelessWidget {
-  const RevealPage({super.key});
+class RevealPage extends StatefulWidget {
+  const RevealPage({super.key, required this.connectionId});
+  final String connectionId;
+  @override
+  State<RevealPage> createState() => _RevealPageState();
+}
+
+class _RevealPageState extends State<RevealPage> {
+  Map<String, dynamic>? _status;
+  String? _revealedPhotoUrl;
+  bool _busy = false;
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final result = await LoveBackend.photoRevealStatus(widget.connectionId);
+      final photoUrl = result['both_consented'] == true
+          ? await LoveBackend.revealedPartnerPhotoUrl(widget.connectionId)
+          : null;
+      if (mounted)
+        setState(() {
+          _status = result;
+          _revealedPhotoUrl = photoUrl;
+        });
+    } catch (_) {
+      if (mounted)
+        notice(context, 'Reveal status is unavailable from the server.');
+    }
+  }
+
+  Future<void> _consent(bool value) async {
+    setState(() => _busy = true);
+    try {
+      await LoveBackend.setPhotoRevealConsent(widget.connectionId, value);
+      await _load();
+      if (mounted)
+        notice(
+          context,
+          value ? 'Your consent was recorded.' : 'Your consent was withdrawn.',
+        );
+    } catch (_) {
+      if (mounted)
+        notice(
+          context,
+          'Consent is available only after the server confirms 14 days.',
+        );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => FlowPage(
     title: 'Photo reveal',
@@ -2103,23 +3042,47 @@ class RevealPage extends StatelessWidget {
           'After 14 calendar days from mutual acceptance, each person can separately consent to reveal only their profile photo. No other hidden details are revealed.',
         ),
         const SizedBox(height: 16),
-        const StateCard(
+        StateCard(
           title: 'Reveal status',
-          value: 'Not available',
-          body: 'The server controls the timer and confirms both consents.',
+          value: _status?['eligible'] == true
+              ? 'Consent available'
+              : 'Waiting period',
+          body: _status == null
+              ? 'Checking with the server…'
+              : (_status!['eligible'] == true
+                    ? (_status!['both_consented'] == true
+                          ? 'Both people consented. Photo delivery remains protected until the secure reveal service is configured.'
+                          : (_status!['my_consented'] == true
+                                ? 'Your consent is recorded. Waiting for the other person.'
+                                : 'You have been connected for 14 days. Would you like to reveal your profile photo?'))
+                    : 'The server is counting down from mutual acceptance. Photos remain hidden.'),
           color: LoveColors.amber,
           icon: Icons.lock_clock_outlined,
         ),
         const SizedBox(height: 12),
-        const CheckboxListTile(
-          value: false,
-          onChanged: null,
-          title: Text('I consent to reveal my profile photo'),
-          subtitle: Text('Consent is recorded separately.'),
-        ),
-        const FilledButton(
-          onPressed: null,
-          child: Text('Backend setup required'),
+        if (_revealedPhotoUrl != null)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: Image.network(
+              _revealedPhotoUrl!,
+              height: 280,
+              fit: BoxFit.cover,
+            ),
+          ),
+        if (_status?['eligible'] == true &&
+            _status?['both_consented'] != true) ...[
+          FilledButton(
+            onPressed: _busy ? null : () => _consent(true),
+            child: Text(_busy ? 'Saving…' : 'I consent to photo reveal'),
+          ),
+          TextButton(
+            onPressed: _busy ? null : () => _consent(false),
+            child: const Text('Decline / withdraw consent'),
+          ),
+        ],
+        const NoticeBox(
+          'A photo is never shown from one person’s consent alone. Secure photo delivery must also be enabled by the service.',
+          Icons.lock_outline,
         ),
       ],
     ),
@@ -2131,50 +3094,271 @@ class SettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => FlowPage(
     title: 'Settings & safety',
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          'Your account, your boundaries.',
-          style: Theme.of(context).textTheme.headlineMedium,
-        ),
-        const SizedBox(height: 12),
-        SettingItem(
-          Icons.notifications_outlined,
-          'Notifications',
-          'Reminders and updates',
-          () => go(context, const BasicSettingPage(title: 'Notifications')),
-        ),
-        SettingItem(
-          Icons.shield_outlined,
-          'Privacy',
-          'Profile and photo visibility',
-          () => go(context, const BasicSettingPage(title: 'Privacy')),
-        ),
-        SettingItem(
-          Icons.block_outlined,
-          'Block or report',
-          'Get help with a safety concern',
-          () => go(context, const SafetyPage()),
-        ),
-        SettingItem(
-          Icons.favorite_border,
-          'Unmatch',
-          'Remove a connection at any time',
-          () => go(context, const ConnectionsPage()),
-        ),
-        SettingItem(
-          Icons.delete_outline,
-          'Delete account',
-          'Request account and data deletion',
-          () => go(context, const DeleteAccountPage()),
-        ),
-        const SizedBox(height: 12),
-        const NoticeBox(
-          'Settings are previews until connected to the backend.',
-          Icons.info_outline,
-        ),
-      ],
+    child: !love21NavigationUnlocked.value
+        ? const LockedFeatureMessage()
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Your account, your boundaries.',
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+              const SizedBox(height: 12),
+              SettingItem(
+                Icons.person_outline,
+                'Profile',
+                'Edit your profile information',
+                () => go(context, const EditProfilePage()),
+              ),
+              SettingItem(
+                Icons.notifications_outlined,
+                'Notifications',
+                'Reminders and updates',
+                () =>
+                    go(context, const BasicSettingPage(title: 'Notifications')),
+              ),
+              SettingItem(
+                Icons.shield_outlined,
+                'Privacy',
+                'Profile and photo visibility',
+                () => go(context, const BasicSettingPage(title: 'Privacy')),
+              ),
+              SettingItem(
+                Icons.block_outlined,
+                'Block or report',
+                'Get help with a safety concern',
+                () => go(context, const SafetyPage()),
+              ),
+              SettingItem(
+                Icons.favorite_border,
+                'Unmatch',
+                'Remove a connection at any time',
+                () => go(context, const ConnectionsPage()),
+              ),
+              SettingItem(
+                Icons.delete_outline,
+                'Delete account',
+                'Request account and data deletion',
+                () => go(context, const DeleteAccountPage()),
+              ),
+              const SizedBox(height: 12),
+            ],
+          ),
+  );
+}
+
+class EditProfilePage extends StatefulWidget {
+  const EditProfilePage({super.key});
+  @override
+  State<EditProfilePage> createState() => _EditProfilePageState();
+}
+
+class _EditProfilePageState extends State<EditProfilePage> {
+  final _name = TextEditingController();
+  final _bio = TextEditingController();
+  final _picker = ImagePicker();
+  XFile? _selectedPhoto;
+  String? _photoUrl;
+  String? _photoPath;
+  bool _loading = true;
+  bool _saving = false;
+  final _form = GlobalKey<FormState>();
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _bio.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    if (!LoveBackend.configured ||
+        LoveBackend.client.auth.currentUser == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    try {
+      final profile = await LoveBackend.myProfile();
+      _name.text = (profile['full_name'] ?? '').toString();
+      _bio.text = (profile['short_bio'] ?? '').toString();
+      _photoPath = profile['profile_photo_path'] as String?;
+      _photoUrl = await LoveBackend.myProfilePhotoUrl(_photoPath);
+    } catch (_) {
+      if (mounted) notice(context, 'Could not load your profile.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _pickPhoto() async {
+    final file = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 88,
+      maxWidth: 1600,
+    );
+    if (file != null && mounted) setState(() => _selectedPhoto = file);
+  }
+
+  Future<void> _save() async {
+    if (!_form.currentState!.validate()) return;
+    if (!LoveBackend.configured ||
+        LoveBackend.client.auth.currentUser == null) {
+      notice(context, 'Profile editing requires a signed-in backend account.');
+      return;
+    }
+    setState(() => _saving = true);
+    String? uploadedPath;
+    try {
+      if (_selectedPhoto != null)
+        uploadedPath = await LoveBackend.uploadProfilePhoto(_selectedPhoto!);
+      await LoveBackend.updateMyProfile(
+        fullName: _name.text,
+        shortBio: _bio.text,
+        profilePhotoPath: uploadedPath,
+      );
+      if (uploadedPath != null && _photoPath != null) {
+        try {
+          await LoveBackend.removeMyProfilePhoto(_photoPath!);
+        } catch (_) {
+          /* Retain the previous private object if cleanup fails. */
+        }
+      }
+      if (!mounted) return;
+      notice(context, 'Profile updated.');
+      Navigator.pop(context);
+    } catch (_) {
+      if (uploadedPath != null) {
+        try {
+          await LoveBackend.removeMyProfilePhoto(uploadedPath);
+        } catch (_) {
+          /* A private orphan can be removed by storage cleanup. */
+        }
+      }
+      if (mounted)
+        notice(context, 'Your profile could not be saved. Try again.');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => FlowPage(
+    title: 'Edit profile',
+    child: _loading
+        ? const Center(child: CircularProgressIndicator())
+        : Form(
+            key: _form,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Column(
+                    children: [
+                      GestureDetector(
+                        onTap: _pickPhoto,
+                        child: CircleAvatar(
+                          radius: 54,
+                          backgroundColor: LoveColors.blush,
+                          child: _selectedPhoto != null
+                              ? FutureBuilder<Uint8List>(
+                                  future: _selectedPhoto!.readAsBytes(),
+                                  builder: (context, snap) => snap.hasData
+                                      ? ClipOval(
+                                          child: Image.memory(
+                                            snap.data!,
+                                            width: 108,
+                                            height: 108,
+                                            fit: BoxFit.cover,
+                                          ),
+                                        )
+                                      : const Icon(
+                                          Icons.person_outline,
+                                          size: 42,
+                                          color: LoveColors.wine,
+                                        ),
+                                )
+                              : _photoUrl != null
+                              ? ClipOval(
+                                  child: Image.network(
+                                    _photoUrl!,
+                                    width: 108,
+                                    height: 108,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => const Icon(
+                                      Icons.person_outline,
+                                      size: 42,
+                                      color: LoveColors.wine,
+                                    ),
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.person_outline,
+                                  size: 42,
+                                  color: LoveColors.wine,
+                                ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: _pickPhoto,
+                        icon: const Icon(Icons.photo_camera_outlined),
+                        label: const Text('Change photo'),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _name,
+                  maxLength: 60,
+                  decoration: const InputDecoration(labelText: 'Display name'),
+                  validator: (v) =>
+                      v == null || v.trim().isEmpty ? 'Enter your name' : null,
+                ),
+                const SizedBox(height: 10),
+                TextFormField(
+                  controller: _bio,
+                  maxLength: 180,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    labelText: 'Short description',
+                  ),
+                  validator: (v) => (v?.length ?? 0) > 180
+                      ? 'Use 180 characters or fewer'
+                      : null,
+                ),
+                const SizedBox(height: 18),
+                FilledButton(
+                  onPressed: _saving ? null : _save,
+                  child: Text(_saving ? 'Saving…' : 'Save Changes'),
+                ),
+                TextButton(
+                  onPressed: _saving ? null : () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                const NoticeBox(
+                  'Your birth date, registered gender, verification and eligibility remain protected.',
+                  Icons.lock_outline,
+                ),
+              ],
+            ),
+          ),
+  );
+}
+
+class LockedFeatureMessage extends StatelessWidget {
+  const LockedFeatureMessage({super.key});
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+    padding: EdgeInsets.only(top: 24),
+    child: NoticeBox(
+      'Complete all 21 verified challenge days to unlock this section.',
+      Icons.lock_outline,
     ),
   );
 }
@@ -2242,30 +3426,34 @@ class _BasicSettingPageState extends State<BasicSettingPage> {
   @override
   Widget build(BuildContext context) => FlowPage(
     title: widget.title,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (_loading) const LinearProgressIndicator(),
-        SwitchListTile(
-          value: _notifications,
-          onChanged: (value) => _save(notifications: value),
-          title: const Text('Notifications'),
-          subtitle: const Text('Challenge reminders and connection updates'),
-        ),
-        SwitchListTile(
-          value: _visible,
-          onChanged: (value) => _save(visible: value),
-          title: const Text('Profile discoverable'),
-          subtitle: const Text(
-            'Allow eligible members to see your anonymous profile',
+    child: !love21NavigationUnlocked.value
+        ? const LockedFeatureMessage()
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_loading) const LinearProgressIndicator(),
+              SwitchListTile(
+                value: _notifications,
+                onChanged: (value) => _save(notifications: value),
+                title: const Text('Notifications'),
+                subtitle: const Text(
+                  'Challenge reminders and connection updates',
+                ),
+              ),
+              SwitchListTile(
+                value: _visible,
+                onChanged: (value) => _save(visible: value),
+                title: const Text('Profile discoverable'),
+                subtitle: const Text(
+                  'Allow eligible members to see your anonymous profile',
+                ),
+              ),
+              const NoticeBox(
+                'Challenge photos remain private. These settings do not change challenge-photo access.',
+                Icons.lock_outline,
+              ),
+            ],
           ),
-        ),
-        const NoticeBox(
-          'Challenge photos remain private. These settings do not change challenge-photo access.',
-          Icons.lock_outline,
-        ),
-      ],
-    ),
   );
 }
 
@@ -2447,6 +3635,80 @@ class DeleteAccountPage extends StatelessWidget {
   );
 }
 
+class DemoPreviewSectionPage extends StatelessWidget {
+  const DemoPreviewSectionPage({super.key, required this.index});
+  final int index;
+  @override
+  Widget build(BuildContext context) {
+    const titles = ['Challenge', 'Discover', 'Connections', 'Settings'];
+    const descriptions = [
+      'Your 21-day challenge preview.',
+      'Browse sample profiles in Discovery preview.',
+      'Real connections appear after backend-confirmed mutual interest.',
+      'Preview account and safety settings.',
+    ];
+    return FlowPage(
+      title: '${titles[index]} preview',
+      previewTabs: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const NoticeBox(
+            'Preview mode • Age and identity eligibility are bypassed for screen previews only.',
+            Icons.visibility_outlined,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            descriptions[index],
+            style: Theme.of(context).textTheme.headlineMedium,
+          ),
+          if (index == 2)
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Text(
+                'Your connections will appear here after a real mutual match.',
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class LoveBottomNavigation extends StatelessWidget {
+  const LoveBottomNavigation({
+    super.key,
+    required this.selectedIndex,
+    required this.onSelected,
+  });
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+  @override
+  Widget build(BuildContext context) => NavigationBar(
+    selectedIndex: selectedIndex,
+    onDestinationSelected: onSelected,
+    destinations: const [
+      NavigationDestination(
+        icon: Icon(Icons.auto_stories_outlined),
+        label: 'Challenge',
+      ),
+      NavigationDestination(
+        icon: Icon(Icons.explore_outlined),
+        label: 'Discover',
+      ),
+      NavigationDestination(icon: Icon(Icons.favorite_border), label: 'Likes'),
+      NavigationDestination(
+        icon: Icon(Icons.forum_outlined),
+        label: 'Connections',
+      ),
+      NavigationDestination(
+        icon: Icon(Icons.person_outline),
+        label: 'Settings',
+      ),
+    ],
+  );
+}
+
 class FlowPage extends StatelessWidget {
   const FlowPage({
     super.key,
@@ -2454,79 +3716,131 @@ class FlowPage extends StatelessWidget {
     this.title,
     this.showBack = true,
     this.actions = const [],
+    this.sketchAlignment,
+    this.bottomAction,
+    this.expandBody = false,
+    this.persistentTabs = false,
+    this.previewTabs = false,
   });
   final Widget child;
   final String? title;
   final bool showBack;
   final List<Widget> actions;
+  final Alignment? sketchAlignment;
+  final Widget? bottomAction;
+  final bool expandBody;
+  final bool persistentTabs;
+  final bool previewTabs;
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: LoveColors.canvas,
-    appBar: AppBar(
-      leading: showBack && Navigator.of(context).canPop()
-          ? IconButton(
-              onPressed: () => Navigator.of(context).pop(),
-              icon: const Icon(Icons.arrow_back),
-            )
-          : null,
-      title: title == null
-          ? null
-          : Text(
-              title!,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
-      actions: actions,
-    ),
-    body: SafeArea(
-      top: false,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 10, 20, 30),
-        children: [if (!LoveBackend.configured) const DemoStrip(), child],
+  Widget build(BuildContext context) {
+    final hasSketchBackground = true;
+    final artworkAlignment = sketchAlignment ?? const Alignment(0, -0.1);
+    return Scaffold(
+      backgroundColor: LoveColors.canvas,
+      extendBodyBehindAppBar: hasSketchBackground,
+      appBar: AppBar(
+        backgroundColor: hasSketchBackground
+            ? Colors.transparent
+            : LoveColors.canvas,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        leading: showBack && Navigator.of(context).canPop()
+            ? IconButton(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.arrow_back),
+              )
+            : null,
+        title: title == null
+            ? null
+            : Text(
+                title!,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+        actions: actions,
       ),
-    ),
-  );
+      bottomNavigationBar: (persistentTabs || previewTabs)
+          ? SafeArea(
+              child: LoveBottomNavigation(
+                selectedIndex: previewTabs ? 1 : love21SelectedTab.value,
+                onSelected: (index) {
+                  if (previewTabs) {
+                    if (index != 1)
+                      go(context, DemoPreviewSectionPage(index: index));
+                    return;
+                  }
+                  love21SelectedTab.value = index;
+                  final nav = Navigator.of(context);
+                  if (nav.canPop())
+                    nav.popUntil(
+                      (route) =>
+                          route.settings.name == 'MainShell' || route.isFirst,
+                    );
+                },
+              ),
+            )
+          : bottomAction == null
+          ? null
+          : SafeArea(
+              minimum: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+              child: bottomAction!,
+            ),
+      body: SafeArea(
+        top: false,
+        child: Stack(
+          children: [
+            if (hasSketchBackground)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Opacity(
+                    opacity: 0.6,
+                    child: ClipRect(
+                      child: Transform.scale(
+                        scale: 1.04,
+                        alignment: artworkAlignment,
+                        child: Image.asset(
+                          'assets/images/love21_global_background_40_transparent.png',
+                          fit: BoxFit.cover,
+                          alignment: artworkAlignment,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            if (expandBody)
+              Positioned.fill(child: child)
+            else
+              ListView(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  hasSketchBackground
+                      ? MediaQuery.paddingOf(context).top + kToolbarHeight + 10
+                      : 10,
+                  20,
+                  30,
+                ),
+                children: [child],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class BrandMark extends StatelessWidget {
   const BrandMark({super.key});
   @override
-  Widget build(BuildContext context) => const Row(
-    children: [
-      CircleAvatar(
-        radius: 18,
-        backgroundColor: LoveColors.wine,
-        child: Text(
-          'L',
-          style: TextStyle(
-            color: Colors.white,
-            fontFamily: 'serif',
-            fontSize: 22,
-          ),
-        ),
-      ),
-      SizedBox(width: 9),
-      Text(
-        'Love 21',
-        style: TextStyle(
-          color: LoveColors.wine,
-          fontFamily: 'serif',
-          fontWeight: FontWeight.w700,
-          fontSize: 21,
-        ),
-      ),
-    ],
-  );
-}
-
-class DemoStrip extends StatelessWidget {
-  const DemoStrip({super.key});
-  @override
-  Widget build(BuildContext context) => const Padding(
-    padding: EdgeInsets.only(bottom: 10),
-    child: NoticeBox(
-      'DEMO • Backend not connected; actions are not saved or verified.',
-      Icons.visibility_outlined,
-    ),
+  Widget build(BuildContext context) => Image.asset(
+    'assets/images/love21_logo.png',
+    width: 138,
+    height: 108,
+    fit: BoxFit.contain,
+    semanticLabel: 'Love 21',
   );
 }
 
@@ -2715,8 +4029,29 @@ class SettingItem extends StatelessWidget {
 
 String? requiredField(String? value) =>
     value == null || value.trim().isEmpty ? 'This field is required' : null;
-void go(BuildContext context, Widget page) =>
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+void go(BuildContext context, Widget page) => Navigator.of(context).push(
+  MaterialPageRoute<void>(
+    settings: RouteSettings(name: page.runtimeType.toString()),
+    builder: (_) => page,
+  ),
+);
+String _connectionDate(dynamic value) {
+  final date = DateTime.tryParse(value?.toString() ?? '')?.toLocal();
+  if (date == null) return 'Connected';
+  final days = DateTime.now().difference(date).inDays;
+  return days <= 0 ? 'today' : '$days days ago';
+}
+
+String _revealCountdown(dynamic value) {
+  final matched = DateTime.tryParse(value?.toString() ?? '')?.toUtc();
+  if (matched == null) return 'Reveal timer unavailable';
+  final remaining = matched
+      .add(const Duration(days: 14))
+      .difference(DateTime.now().toUtc());
+  if (remaining <= Duration.zero) return 'Photo reveal consent available';
+  return 'Photo reveal in ${remaining.inDays}d ${remaining.inHours.remainder(24)}h';
+}
+
 void notice(BuildContext context, String message) =>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),

@@ -1,37 +1,124 @@
-import 'dart:typed_data';
+import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+final ValueNotifier<int> love21VerifiedDays = ValueNotifier<int>(0);
+final ValueNotifier<bool> love21NavigationUnlocked = ValueNotifier<bool>(false);
+final ValueNotifier<int> love21SelectedTab = ValueNotifier<int>(0);
 
 /// Local-only demo data. These simulated outcomes never call Supabase.
 class LoveDemo {
   LoveDemo._();
   static const _daysKey = 'love21_demo_verified_days';
   static const _ageKey = 'love21_demo_age_eligible';
-  static const _identityKey = 'love21_demo_identity_status';
-  static const enabled = true;
+  static const _discoveryEligibilityKey = 'love21_demo_discovery_eligible';
+  static const _genderKey = 'love21_demo_registered_gender';
+  static const _previewNoticeKey = 'love21_demo_preview_notice_shown';
+  static const _interestsKey = 'love21_demo_interested_profiles';
+  static const _messagesKey = 'love21_demo_chat_messages';
+  static const _likesKey = 'love21_demo_incoming_likes';
+  static bool get enabled => !LoveBackend.configured;
 
-  static Future<int> verifiedDays() async =>
-      (await SharedPreferences.getInstance()).getInt(_daysKey) ?? 0;
-  static Future<void> setVerifiedDays(int value) async =>
-      (await SharedPreferences.getInstance()).setInt(
-        _daysKey,
-        value.clamp(0, 21),
-      );
+  static Future<int> verifiedDays() async {
+    final value = (await SharedPreferences.getInstance()).getInt(_daysKey) ?? 0;
+    love21VerifiedDays.value = value.clamp(0, 21).toInt();
+    return love21VerifiedDays.value;
+  }
+
+  static Future<void> setVerifiedDays(int value) async {
+    final safeValue = value.clamp(0, 21).toInt();
+    love21VerifiedDays.value = safeValue;
+    await (await SharedPreferences.getInstance()).setInt(_daysKey, safeValue);
+  }
+
   static Future<void> addVerifiedDay() async =>
       setVerifiedDays((await verifiedDays()) + 1);
   static Future<void> setAgeEligible(bool value) async =>
       (await SharedPreferences.getInstance()).setBool(_ageKey, value);
   static Future<bool> ageEligible() async =>
       (await SharedPreferences.getInstance()).getBool(_ageKey) ?? true;
-  static Future<void> setIdentityStatus(String value) async =>
-      (await SharedPreferences.getInstance()).setString(_identityKey, value);
-  static Future<String> identityStatus() async =>
-      (await SharedPreferences.getInstance()).getString(_identityKey) ??
-      'verified';
-  static Future<void> reset() async =>
-      (await SharedPreferences.getInstance()).clear();
+  static Future<String> identityStatus() async => 'pending';
+  static Future<bool> discoveryEligible() async =>
+      (await SharedPreferences.getInstance()).getBool(
+        _discoveryEligibilityKey,
+      ) ??
+      false;
+  static Future<void> setDiscoveryEligible(bool value) async {
+    love21NavigationUnlocked.value = value;
+    await (await SharedPreferences.getInstance()).setBool(
+      _discoveryEligibilityKey,
+      value,
+    );
+  }
+
+  static Future<void> setRegisteredGender(String value) async =>
+      (await SharedPreferences.getInstance()).setString(_genderKey, value);
+  static Future<String?> registeredGender() async =>
+      (await SharedPreferences.getInstance()).getString(_genderKey);
+  static Future<bool> previewNoticeShown() async =>
+      (await SharedPreferences.getInstance()).getBool(_previewNoticeKey) ?? false;
+  static Future<void> markPreviewNoticeShown() async =>
+      (await SharedPreferences.getInstance()).setBool(_previewNoticeKey, true);
+
+  static Future<List<Map<String, dynamic>>> interestedProfiles() async {
+    final raw = (await SharedPreferences.getInstance()).getString(_interestsKey);
+    if (raw == null) return [];
+    try { return (jsonDecode(raw) as List).map((row) => Map<String, dynamic>.from(row as Map)).toList(); }
+    catch (_) { return []; }
+  }
+  static Future<void> addInterestedProfile(Map<String, dynamic> profile) async {
+    final prefs = await SharedPreferences.getInstance();
+    final rows = await interestedProfiles();
+    final id = profile['candidate_id'].toString();
+    if (rows.any((row) => row['candidate_id'].toString() == id)) return;
+    rows.insert(0, {...profile, 'id': id, 'matched_at': DateTime.now().toIso8601String(), 'demo_status': 'Demo interest • awaiting mutual interest'});
+    await prefs.setString(_interestsKey, jsonEncode(rows));
+  }
+  static Future<List<Map<String, dynamic>>> demoMessages(String profileId) async {
+    final raw = (await SharedPreferences.getInstance()).getString(_messagesKey);
+    if (raw == null) return [];
+    try { final all = Map<String, dynamic>.from(jsonDecode(raw) as Map); return (all[profileId] as List? ?? []).map((row) => Map<String, dynamic>.from(row as Map)).toList(); }
+    catch (_) { return []; }
+  }
+  static Future<void> addDemoMessage(String profileId, String text) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_messagesKey);
+    final all = raw == null ? <String, dynamic>{} : Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    final rows = List<Map<String, dynamic>>.from((all[profileId] as List? ?? []).map((row) => Map<String, dynamic>.from(row as Map)));
+    rows.add({'sender_id': 'demo_me', 'body': text.trim(), 'created_at': DateTime.now().toIso8601String()});
+    all[profileId] = rows;
+    await prefs.setString(_messagesKey, jsonEncode(all));
+  }
+  static Future<String?> quizAnswer(int day) async =>
+      (await SharedPreferences.getInstance()).getString('love21_quiz_$day');
+  static Future<void> saveQuizAnswer(int day, String answer) async =>
+      (await SharedPreferences.getInstance()).setString('love21_quiz_$day', answer);
+  static Future<List<Map<String, dynamic>>> incomingLikes() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_likesKey);
+    if (raw != null) {
+      try { return (jsonDecode(raw) as List).map((e) => Map<String, dynamic>.from(e as Map)).toList(); } catch (_) {}
+    }
+    final seeded = [
+      {'candidate_id':'demo_like_maya','display_name':'Maya','age':22,'gender':'Woman','short_bio':'Loves weekend hikes and quiet coffee shops.','interests':['Hiking','Coffee','Travel'],'message':'Maybe this is the beginning of something lovely.'},
+      {'candidate_id':'demo_like_anika','display_name':'Anika','age':23,'gender':'Woman','short_bio':'Finding joy in music, books, and new recipes.','interests':['Music','Reading','Cooking'],'message':'Someone noticed your smile. Start with a simple hello.'},
+    ];
+    await prefs.setString(_likesKey, jsonEncode(seeded));
+    return seeded;
+  }
+  static Future<void> removeIncomingLike(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    final rows = await incomingLikes(); rows.removeWhere((e) => e['candidate_id'] == id);
+    await prefs.setString(_likesKey, jsonEncode(rows));
+  }
+  static Future<void> reset() async {
+    await (await SharedPreferences.getInstance()).clear();
+    love21VerifiedDays.value = 0;
+    love21NavigationUnlocked.value = false;
+  }
 }
 
 class LoveBackend {
@@ -122,11 +209,112 @@ class LoveBackend {
     return result == true;
   }
 
-  static Future<List<Map<String, dynamic>>> discoveryCandidates() async {
-    final result = await client.rpc('get_discovery_candidates');
+  static Future<List<Map<String, dynamic>>> discoveryCandidates({
+    int offset = 0,
+  }) async {
+    final result = await client.rpc(
+      'get_discovery_candidates_page',
+      params: {'p_offset': offset, 'p_limit': 20},
+    );
     return (result as List)
         .map((row) => Map<String, dynamic>.from(row as Map))
         .toList();
+  }
+
+  static Future<List<Map<String, dynamic>>> mySavedProfiles() async {
+    final result = await client.rpc('my_saved_discovery_profiles');
+    return (result as List)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .toList();
+  }
+
+  static Future<Map<String, dynamic>> myProfile() async {
+    final user = client.auth.currentUser;
+    if (user == null) throw const AuthException('Please sign in again.');
+    final row = await client
+        .from('profiles')
+        .select('full_name, short_bio, profile_photo_path')
+        .eq('id', user.id)
+        .single();
+    return Map<String, dynamic>.from(row);
+  }
+
+  static Future<void> updateMyProfile({
+    required String fullName,
+    required String shortBio,
+    String? profilePhotoPath,
+  }) async {
+    final user = client.auth.currentUser;
+    if (user == null) throw const AuthException('Please sign in again.');
+    await client
+        .from('profiles')
+        .update({
+          'full_name': fullName.trim(),
+          'short_bio': shortBio.trim(),
+          if (profilePhotoPath != null) 'profile_photo_path': profilePhotoPath,
+        })
+        .eq('id', user.id);
+  }
+
+  static Future<String> uploadProfilePhoto(XFile photo) async {
+    final user = client.auth.currentUser;
+    if (user == null) throw const AuthException('Please sign in again.');
+    final path =
+        '${user.id}/${DateTime.now().toUtc().microsecondsSinceEpoch}.jpg';
+    await client.storage
+        .from('private-profile-photos')
+        .uploadBinary(
+          path,
+          await photo.readAsBytes(),
+          fileOptions: const FileOptions(
+            contentType: 'image/jpeg',
+            upsert: false,
+          ),
+        );
+    return path;
+  }
+
+  static Future<String?> myProfilePhotoUrl(String? path) async {
+    if (path == null || path.isEmpty) return null;
+    return client.storage
+        .from('private-profile-photos')
+        .createSignedUrl(path, 15 * 60);
+  }
+
+  static Future<void> removeMyProfilePhoto(String path) async {
+    await client.storage.from('private-profile-photos').remove([path]);
+  }
+
+  static Future<Map<String, dynamic>> photoRevealStatus(
+    String connectionId,
+  ) async {
+    final result = await client.rpc(
+      'my_photo_reveal_status',
+      params: {'p_connection_id': connectionId},
+    );
+    return Map<String, dynamic>.from(result as Map);
+  }
+
+  static Future<bool> setPhotoRevealConsent(
+    String connectionId,
+    bool consented,
+  ) async {
+    final result = await client.rpc(
+      'set_photo_reveal_consent',
+      params: {'p_connection_id': connectionId, 'p_consented': consented},
+    );
+    return result == true;
+  }
+
+  static Future<String?> revealedPartnerPhotoUrl(String connectionId) async {
+    final path = await client.rpc(
+      'my_revealed_partner_photo_path',
+      params: {'p_connection_id': connectionId},
+    );
+    if (path == null || path.toString().isEmpty) return null;
+    return client.storage
+        .from('private-profile-photos')
+        .createSignedUrl(path.toString(), 15 * 60);
   }
 
   static Future<String> submitChallengePhoto({
@@ -291,14 +479,8 @@ class LoveBackend {
   }
 
   static Future<List<Map<String, dynamic>>> myConnections() async {
-    final user = client.auth.currentUser;
-    if (user == null) return [];
-    final result = await client
-        .from('connections')
-        .select('id, user_a, user_b, matched_at')
-        .or('user_a.eq.' + user.id + ',user_b.eq.' + user.id)
-        .isFilter('unmatched_at', null)
-        .order('matched_at', ascending: false);
+    if (client.auth.currentUser == null) return [];
+    final result = await client.rpc('my_connection_previews');
     return (result as List)
         .map((row) => Map<String, dynamic>.from(row as Map))
         .toList();

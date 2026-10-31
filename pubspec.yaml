@@ -21,3 +21,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/images/love21_couple_banner.png
+    - assets/images/love21_logo.png
+    - assets/images/love21_login_couple.png
+    - assets/images/love21_sketch_reactions.png
+    - assets/images/love21_sketch_reactions_transparent.png
+    - assets/images/love21_global_background_40_transparent.png
